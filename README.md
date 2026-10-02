@@ -66,7 +66,7 @@ flowchart LR
 | 🔎 **Consulta** | Página filtrável por tipo, entidade, usuário, texto e período, sempre em `occurredAt` DESC |
 | 📊 **Resumo** | Totais por tipo e por dia no fuso `America/Sao_Paulo`, sem buracos no intervalo |
 | 🔐 **Acesso** | Header `X-Internal-Token` obrigatório; sem token configurado a API recusa tudo |
-| 📈 **Saúde** | Actuator em `/actuator/health` (público) |
+| 📈 **Saúde e métricas** | Actuator na porta de gerenciamento **8090** (não publicada): `/actuator/health` e `/actuator/prometheus`, coletado pelo Prometheus da API |
 
 ## 🚀 Como rodar
 
@@ -96,7 +96,7 @@ export LOGS_API_TOKEN=local-logs-token
 O serviço sobe em **http://localhost:8089**. Para conferir:
 
 ```bash
-curl http://localhost:8089/actuator/health                                          # {"status":"UP"}
+curl http://localhost:8090/actuator/health                                          # {"status":"UP"}
 curl -H 'X-Internal-Token: local-logs-token' http://localhost:8089/api/v1/logs       # página de logs
 ```
 
@@ -130,6 +130,7 @@ A imagem é multi-stage, com cache das dependências do Gradle numa camada próp
 | Variável | Descrição |
 |---|---|
 | `MONGODB_URI` | Conexão completa com o MongoDB, credenciais incluídas. Sem ela, o padrão é `mongodb://localhost:27017/logs-production-review` **sem autenticação** |
+| `MANAGEMENT_PORT` | Porta do Actuator (padrão `8090`). Não publique: o Prometheus acessa pela rede interna |
 | `LOGS_API_TOKEN` | Token esperado no header `X-Internal-Token`. **Sem valor padrão** de propósito: vazio, a API responde 401 a tudo e registra um aviso no startup |
 
 </details>
@@ -182,7 +183,8 @@ Todas as rotas em `/api/v1` exigem o header `X-Internal-Token`. Sem ele, ou com 
 |---|---|---|
 | `GET` | `/api/v1/logs` | Página de logs, `occurredAt` DESC |
 | `GET` | `/api/v1/logs/summary` | Totais por tipo e por dia |
-| `GET` | `/actuator/health` | Saúde do serviço (**público**) |
+| `GET` | `:8090/actuator/health` | Saúde do serviço (porta de gerenciamento) |
+| `GET` | `:8090/actuator/prometheus` | Métricas, incluindo `reviewstore_logs_events_total{type,result=stored\|duplicate\|dead_letter}` |
 
 ### `GET /api/v1/logs`
 
