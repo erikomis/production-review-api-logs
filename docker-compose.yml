@@ -14,12 +14,15 @@ services:
       - mongo
     ports:
       - "8089:8089"
+    # 8090 = actuator/métricas: só na rede interna
+    expose:
+      - "8090"
     environment:
       MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:?defina MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD:?defina MONGO_ROOT_PASSWORD}@mongo:27017/logs-production-review?authSource=admin
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
       LOGS_API_TOKEN: ${LOGS_API_TOKEN:?defina LOGS_API_TOKEN}
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8089 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
       interval: 30s
       timeout: 5s
       retries: 3
