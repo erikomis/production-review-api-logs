@@ -1,55 +1,50 @@
-version: '3'
+# Serviço de logs + MongoDB. O Kafka é o mesmo usado pela API principal:
+# informe-o em KAFKA_BOOTSTRAP_SERVERS (e ajuste a rede "broker-kafka" se ele estiver em outro compose).
+#   cp .env.example .env   # preencha as variáveis
+#   docker compose up -d --build
 
 services:
-  mongo_container:
-    image: mongo:latest
-    restart: always
+  logs:
+    build: .
+    # imagem privada no GitHub Container Registry; o deploy define IMAGE_TAG=sha-<commit>
+    # (localmente, `docker compose up -d --build` builda a partir do Dockerfile)
+    image: ghcr.io/erikomis/production-review-api-logs:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    ports:
+      - "8089:8089"
+    # 8090 = actuator/métricas: só na rede interna
+    expose:
+      - "8090"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: senha123
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:?defina MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD:?defina MONGO_ROOT_PASSWORD}@mongo:27017/logs-production-review?authSource=admin
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
+      LOGS_API_TOKEN: ${LOGS_API_TOKEN:?defina LOGS_API_TOKEN}
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - broker-kafka
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?defina MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?defina MONGO_ROOT_PASSWORD}
       MONGO_INITDB_DATABASE: logs-production-review
-    ports:
-      - 27017:27017
     volumes:
-      - mongodb_data_container:/data/db
-  zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+      - mongodb_data:/data/db
     networks:
       - broker-kafka
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-
-  kafka:
-    image: confluentinc/cp-kafka:latest
-    networks:
-      - broker-kafka
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-
-  kafdrop:
-    image: obsidiandynamics/kafdrop:latest
-    networks:
-      - broker-kafka
-    depends_on:
-      - kafka
-    ports:
-      - "19000:9000"
-    environment:
-      KAFKA_BROKERCONNECT: kafka:29092
 
 networks:
   broker-kafka:
     driver: bridge
 
 volumes:
-  mongodb_data_container:
+  mongodb_data:

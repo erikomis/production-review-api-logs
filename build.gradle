@@ -23,15 +23,28 @@ repositories {
     mavenCentral()
 }
 
+// 1.19.x (padrão do Boot 3.3) não negocia a versão da API do Docker Engine 29+
+ext['testcontainers.version'] = '1.21.4'
+
 dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
     implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
     implementation 'org.springframework.kafka:spring-kafka'
-    implementation 'com.google.code.gson:gson:2.11.0'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:mongodb'
+    testImplementation 'org.awaitility:awaitility'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// só o jar executável (bootJar) interessa; evita o "-plain.jar" no build/libs
+tasks.named('jar') {
+    enabled = false
 }
 
 tasks.named('test') {
