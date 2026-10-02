@@ -23,6 +23,9 @@ repositories {
     mavenCentral()
 }
 
+// 1.19.x (padrão do Boot 3.3) não negocia a versão da API do Docker Engine 29+
+ext['testcontainers.version'] = '1.21.4'
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
