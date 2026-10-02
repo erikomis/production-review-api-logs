@@ -6,7 +6,9 @@
 services:
   logs:
     build: .
-    image: production-review-api-logs:latest
+    # imagem privada no GitHub Container Registry; o deploy define IMAGE_TAG=sha-<commit>
+    # (localmente, `docker compose up -d --build` builda a partir do Dockerfile)
+    image: ghcr.io/erikomis/production-review-api-logs:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       - mongo
