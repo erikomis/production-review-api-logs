@@ -5,6 +5,7 @@ import br.com.logsproductionreview.mapper.LogEventMapper;
 import br.com.logsproductionreview.service.LogNotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -23,12 +24,17 @@ public class ProductionReviewApiConsumer {
     private final LogEventMapper logEventMapper;
     private final LogNotificationService logNotificationService;
     private final Clock clock;
+    private final MeterRegistry meterRegistry;
 
     @KafkaListener(topics = "${logs.kafka.topic}", groupId = "${spring.kafka.consumer.group-id}")
     public void consume(String payload) {
         LogNotification logNotification = logEventMapper.fromJson(payload, Instant.now(clock));
-        if (logNotificationService.saveLogNotification(logNotification)) {
+        boolean stored = logNotificationService.saveLogNotification(logNotification);
+        if (stored) {
             log.debug("Log {} gravado (eventId={})", logNotification.getType(), logNotification.getEventId());
         }
+        // reviewstore_logs_events_total{type, result=stored|duplicate}
+        meterRegistry.counter("reviewstore.logs.events",
+                "type", logNotification.getType(), "result", stored ? "stored" : "duplicate").increment();
     }
 }

@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaOperations;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.FixedBackOff;
@@ -40,14 +41,19 @@ public class KafkaConsumerConfig {
     public DefaultErrorHandler kafkaErrorHandler(
             KafkaOperations<Object, Object> kafkaTemplate,
             @Value("${logs.kafka.retry.attempts:2}") long retryAttempts,
-            @Value("${logs.kafka.retry.interval-ms:1000}") long retryIntervalMs
+            @Value("${logs.kafka.retry.interval-ms:1000}") long retryIntervalMs,
+            MeterRegistry meterRegistry
     ) {
         // partição -1: o Kafka escolhe a partição da DLT, então ela não precisa ter
         // o mesmo número de partições do tópico original
         var recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
                 (record, ex) -> new TopicPartition(record.topic() + ".DLT", -1));
 
+        // registrado com 0 no startup para o increase() do Prometheus ver a primeira mensagem inválida
+        var deadLetters = meterRegistry.counter("reviewstore.logs.events", "type", "INVALID", "result", "dead_letter");
+
         var handler = new DefaultErrorHandler((record, ex) -> {
+            deadLetters.increment();
             log.warn("Mensagem enviada para {}.DLT (offset {}): {}",
                     record.topic(), record.offset(), rootMessage(ex));
             recoverer.accept(record, ex);

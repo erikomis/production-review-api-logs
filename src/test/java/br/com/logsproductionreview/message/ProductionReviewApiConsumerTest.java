@@ -9,6 +9,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -48,6 +49,14 @@ class ProductionReviewApiConsumerTest extends MongoContainerSupport {
 
     @Autowired
     private EmbeddedKafkaBroker broker;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
+
+    private double eventsCounter(String type, String result) {
+        var counter = meterRegistry.find("reviewstore.logs.events").tag("type", type).tag("result", result).counter();
+        return counter == null ? 0 : counter.count();
+    }
 
     private Consumer<String, String> dltConsumer;
 
@@ -104,6 +113,9 @@ class ProductionReviewApiConsumerTest extends MongoContainerSupport {
         awaitCount(2);
         assertThat(repository.findAll()).extracting(LogNotification::getEventId)
                 .containsExactlyInAnyOrder("it-dup", "it-after-dup");
+        // métricas: 2 gravados e 1 duplicata descartada
+        assertThat(eventsCounter("USER_LOGGED_IN", "stored")).isGreaterThanOrEqualTo(2.0);
+        assertThat(eventsCounter("USER_LOGGED_IN", "duplicate")).isGreaterThanOrEqualTo(1.0);
     }
 
     @Test
@@ -134,5 +146,6 @@ class ProductionReviewApiConsumerTest extends MongoContainerSupport {
         ConsumerRecord<String, String> deadLetter = dead.stream()
                 .filter(r -> "isto não é json".equals(r.value())).findFirst().orElseThrow();
         assertThat(deadLetter.headers().lastHeader("kafka_dlt-exception-fqcn")).isNotNull();
+        assertThat(eventsCounter("INVALID", "dead_letter")).isGreaterThanOrEqualTo(1.0);
     }
 }
