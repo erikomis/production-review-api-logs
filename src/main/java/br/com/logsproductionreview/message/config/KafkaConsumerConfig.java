@@ -1,63 +1,68 @@
 package br.com.logsproductionreview.message.config;
-import org.apache.kafka.common.serialization.StringDeserializer;
+
+import br.com.logsproductionreview.mapper.InvalidLogEventException;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.kafka.annotation.EnableKafka;
-import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
-import org.springframework.kafka.config.KafkaListenerContainerFactory;
-import org.springframework.kafka.core.ConsumerFactory;
-import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
-import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
-import org.springframework.kafka.listener.ContainerProperties;
-import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
+import org.springframework.kafka.config.TopicBuilder;
+import org.springframework.kafka.core.KafkaOperations;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import static org.apache.kafka.clients.consumer.ConsumerConfig.*;
-
-
-
-
-@EnableKafka
+/**
+ * O consumidor, o produtor (usado só para a DLT) e os deserializadores vêm do
+ * {@code application.properties} via auto-configuração do Spring Boot. Aqui ficam só o
+ * tratamento de erro e a declaração dos tópicos.
+ * <p>
+ * O Boot liga o {@link DefaultErrorHandler} declarado como bean à factory padrão do
+ * {@code @KafkaListener}; com o ack em modo BATCH (padrão) o offset é confirmado pelo
+ * container depois do processamento ou depois de a mensagem ir para a DLT.
+ */
+@Slf4j
 @Configuration
 public class KafkaConsumerConfig {
 
-
-
-    @Value("${spring.kafka.bootstrap-servers}")
-    private String bootstrapServers;
-
-    @Value("${spring.kafka.consumer.group-id}")
-    private String groupId;
-
-
-    public Map<String, Object> consumerConfig() {
-        var props = new HashMap<String, Object>();
-        props.put(BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(GROUP_ID_CONFIG, groupId);
-        props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class.getName());
-        return props;
+    @Bean
+    public NewTopic logsTopic(@Value("${logs.kafka.topic}") String topic) {
+        return TopicBuilder.name(topic).partitions(1).replicas(1).build();
     }
 
     @Bean
-    public ConsumerFactory<String, String> consumerFactory() {
-        return new DefaultKafkaConsumerFactory<>(consumerConfig());
+    public NewTopic logsDeadLetterTopic(@Value("${logs.kafka.topic}") String topic) {
+        return TopicBuilder.name(topic + ".DLT").partitions(1).replicas(1).build();
     }
 
     @Bean
-    public KafkaListenerContainerFactory<ConcurrentMessageListenerContainer<String, String>> factory(
-            ConsumerFactory<String, String> consumerFactory
+    public DefaultErrorHandler kafkaErrorHandler(
+            KafkaOperations<Object, Object> kafkaTemplate,
+            @Value("${logs.kafka.retry.attempts:2}") long retryAttempts,
+            @Value("${logs.kafka.retry.interval-ms:1000}") long retryIntervalMs
     ) {
-        var factory = new ConcurrentKafkaListenerContainerFactory<String, String>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
-        return factory;
+        // partição -1: o Kafka escolhe a partição da DLT, então ela não precisa ter
+        // o mesmo número de partições do tópico original
+        var recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
+                (record, ex) -> new TopicPartition(record.topic() + ".DLT", -1));
+
+        var handler = new DefaultErrorHandler((record, ex) -> {
+            log.warn("Mensagem enviada para {}.DLT (offset {}): {}",
+                    record.topic(), record.offset(), rootMessage(ex));
+            recoverer.accept(record, ex);
+        }, new FixedBackOff(retryIntervalMs, retryAttempts));
+
+        // mensagem malformada não melhora com retry: vai direto para a DLT
+        handler.addNotRetryableExceptions(InvalidLogEventException.class);
+        return handler;
     }
 
-
+    private static String rootMessage(Throwable ex) {
+        Throwable root = ex;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getMessage();
+    }
 }
