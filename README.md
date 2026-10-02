@@ -146,6 +146,34 @@ A imagem é multi-stage, com cache das dependências do Gradle numa camada próp
 
 </details>
 
+## 🐳 Docker e deploy
+
+As imagens são publicadas **privadas** no GitHub Container Registry: `ghcr.io/erikomis/production-review-api-logs`.
+
+```bash
+docker compose up -d --build
+```
+
+```mermaid
+flowchart LR
+    T["tests<br/>gradle test<br/>push na main"] -->|sucesso| P["publish<br/>build do commit testado"]
+    P --> GHCR[("ghcr.io (privado)<br/>latest · sha-commit")]
+    GHCR --> D["deploy<br/>login temporário + pull + up"]
+    D --> VPS["VPS<br/>docker compose"]
+```
+
+- **publish**: só roda depois que os testes do push na `main` passam; builda exatamente o commit testado e publica as tags `latest` e `sha-<commit>`, autenticando com o `GITHUB_TOKEN` do próprio workflow.
+- **deploy**: entra na VPS por SSH, faz login no GHCR com o token temporário do job, sobe a imagem daquele commit e faz logout. **Nenhuma credencial fica salva na VPS.** O deploy fica desligado até você criar a variável `DEPLOY_ENABLED=true`.
+
+| Tipo | Nome | Para quê |
+|---|---|---|
+| Secret | `HOST`, `USERNAME`, `SSH_KEY` | Acesso SSH à VPS |
+| Variável (opcional) | `DEPLOY_DIR` | Pasta do `docker-compose.yml` na VPS (padrão: `logs`) |
+| Variável | `DEPLOY_ENABLED` | Crie com o valor `true` para liberar o deploy. Sem ela, o workflow só publica a imagem |
+
+> [!IMPORTANT]
+> Antes do primeiro deploy, copie o `docker-compose.yml` deste repositório para a pasta da VPS. Depois do primeiro publish, confira em **Perfil → Packages → production-review-api-logs → Package settings** que a visibilidade está **Private**.
+
 ## 📡 Endpoints
 
 Todas as rotas em `/api/v1` exigem o header `X-Internal-Token`. Sem ele, ou com valor errado, a resposta é **401**.
